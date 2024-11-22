@@ -1,4 +1,4 @@
-#VRML_SIM R2022b utf8
+#VRML_SIM R2023b utf8
 
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2022b/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2022b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
@@ -26,8 +26,16 @@ DEF RectangleArena RectangleArena {
   wallHeight 0.5
 }
 DEF Pioneer3dx Pioneer3dx {
-  translation 0.788781 1.07183 0.0975
-  rotation 0 0 -1 2.87979
+  hidden position_0_0 3.691662993427592e-07
+  hidden position_0_1 -1.685432820894722e-10
+  hidden position_0_2 1.7369872994384267e-10
+  hidden rotation_1 0.5773504112818049 -0.5773501981435294 -0.5773501981435168 2.0943947868617507
+  hidden position_1_0 -0.04476976801958088
+  hidden rotation_2 -0.9999999999999999 0 0 0.04476976801958216
+  hidden rotation_4 0.5773502692220618 -0.5773502692220619 -0.5773502691247534 2.0943950000973084
+  hidden rotation_9 0.5773502691561974 -0.5773502691561974 -0.5773502692564825 2.094394999899715
+  translation 0.7920406116600345 1.072703413696425 0.09481555652792553
+  rotation 0.017310126410160262 0.0022789705827246454 0.999847571291118 -2.879828994717574
   controller "pf_controller"
   supervisor TRUE
   extensionSlot [

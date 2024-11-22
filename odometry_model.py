@@ -28,21 +28,40 @@ def get_odometry(last_left_encoder, last_right_encoder, current_left_encoder, cu
               - delta_rot1: First rotation in radians
               - delta_rot2: Second rotation in radians
               - delta_trans: Translation distance in meters
+    Raises:
+        ValueError: If input values are not numbers.
     """
-    # Calculate wheel displacements
-    delta_left = (current_left_encoder - last_left_encoder) * WHEEL_RADIUS
-    delta_right = (current_right_encoder - last_right_encoder) * WHEEL_RADIUS
+    try:
+        # Validate inputs
+        if not all(isinstance(arg, (int, float)) for arg in [last_left_encoder, last_right_encoder, current_left_encoder, current_right_encoder]):
+            raise ValueError("All encoder values must be numbers.")
 
-    # Compute the change in orientation (delta_theta) and translation (delta_trans)
-    delta_trans = (delta_left + delta_right) / 2.0
-    delta_theta = (delta_right - delta_left) / WHEEL_BASE
+        # Calculate wheel displacements
+        delta_left = (current_left_encoder - last_left_encoder) * WHEEL_RADIUS
+        delta_right = (current_right_encoder - last_right_encoder) * WHEEL_RADIUS
 
-    # Compute the first and second rotations
-    if abs(delta_trans) > 0.01:
-        delta_rot1 = normalize_angle(math.atan2(delta_trans, delta_theta))
-        delta_rot2 = normalize_angle(delta_theta - delta_rot1)
-    else:
-        delta_rot1 = 0.0
-        delta_rot2 = delta_theta
+        # Compute the change in orientation (delta_theta) and translation (delta_trans)
+        delta_trans = (delta_left + delta_right) / 2.0
+        delta_theta = (delta_right - delta_left) / WHEEL_BASE
 
-    return [delta_rot1, delta_rot2, delta_trans]
+        # Compute the first and second rotations
+        if abs(delta_trans) > 0.01:
+            delta_rot1 = normalize_angle(math.atan2(delta_trans, delta_theta))
+            delta_rot2 = normalize_angle(delta_theta - delta_rot1)
+        else:
+            delta_rot1 = 0.0
+            delta_rot2 = delta_theta
+
+        return [delta_rot1, delta_rot2, delta_trans]
+
+    except ZeroDivisionError as e:
+        print("Error: Division by zero encountered in odometry calculations.", e)
+        return [0.0, 0.0, 0.0]
+
+    except ValueError as e:
+        print("Error: Invalid input encountered.", e)
+        return [0.0, 0.0, 0.0]
+
+    except Exception as e:
+        print("An unexpected error occurred:", e)
+        return [0.0, 0.0, 0.0]
