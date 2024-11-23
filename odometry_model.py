@@ -8,21 +8,22 @@ odometry output should use the same parametrization as defined in the odometry-
 based motion model. You can use leftSensor.getValue() and 
 rightSensor.getValue() to obtain the current encoder readings. The returned
 value is the accumulated rotation of the corresponding wheel in radians since
-the start of the simulation. For example, a value of means that the wheel
-rotated two times forwards and indicates that it rotated twice backward. To
+the start of the simulation. For example, a value of pi means that the wheel
+rotated two times forwards and -pi indicates that it rotated twice backward. To
 obtain the robot motion from the encoder readings, you should use the motion
 equations of the differential drive. Further, assume a wheel diameter of and
 the distance between the wheels to be.
 """
 
-def get_odometry(last_left_encoder, last_right_encoder, current_left_encoder, current_right_encoder):
+def get_odometry(last_encoder, current_encoder):
     """
-    Computes odometry from wheel encoder readings using the differential drive model.
+    Computes odometry from wheel encoder readings using the differential drive
+    model.
     Args:
-        last_left_encoder (float): Previous left wheel encoder reading in radians.
-        last_right_encoder (float): Previous right wheel encoder reading in radians.
-        current_left_encoder (float): Current left wheel encoder reading in radians.
-        current_right_encoder (float): Current right wheel encoder reading in radians.
+        last_encoder (dict): Previous encoder readings with 'left' and 'right'
+        keys in radians.
+        current_encoder (dict): Current encoder readings with 'left' and
+        'right' keys in radians.
     Returns:
         list: [delta_rot1, delta_rot2, delta_trans], where:
               - delta_rot1: First rotation in radians
@@ -32,35 +33,31 @@ def get_odometry(last_left_encoder, last_right_encoder, current_left_encoder, cu
         ValueError: If input values are not numbers.
     """
     try:
-        # Validate inputs
-        if not all(isinstance(arg, (int, float)) for arg in [last_left_encoder, last_right_encoder, current_left_encoder, current_right_encoder]):
-            raise ValueError("All encoder values must be numbers.")
-
         # Calculate wheel displacements
-        delta_left = (current_left_encoder - last_left_encoder) * WHEEL_RADIUS
-        delta_right = (current_right_encoder - last_right_encoder) * WHEEL_RADIUS
+        delta_left = WHEEL_RADIUS * (current_encoder["left"] - 
+                                     last_encoder["left"])
+        delta_right = WHEEL_RADIUS * (current_encoder["right"] - 
+                                      last_encoder["right"])
 
-        # Compute the change in orientation (delta_theta) and translation (delta_trans)
-        delta_trans = (delta_left + delta_right) / 2.0
-        delta_theta = (delta_right - delta_left) / WHEEL_BASE
+        # Compute arc length (average of left and right displacements) and
+        # orientation change
+        delta_trans = (delta_left + delta_right) / 2.0 
+        delta_theta = (delta_right - delta_left) / (WHEEL_BASE * 2.0)
 
-        # Compute the first and second rotations
-        if abs(delta_trans) > 0.01:
-            delta_rot1 = normalize_angle(math.atan2(delta_trans, delta_theta))
-            delta_rot2 = normalize_angle(delta_theta - delta_rot1)
-        else:
-            delta_rot1 = 0.0
-            delta_rot2 = delta_theta
+        # Compute the translation (straight-line distance)
+        if delta_theta == 0:  # Straight-line motion
+            straight_line_trans = delta_trans
+        else:  # Circular motion -> use chord length
+            radius = delta_trans / delta_theta  
+            straight_line_trans = (abs(radius) * 
+                                   math.sin(abs(delta_theta) / 2.0))
 
-        return [delta_rot1, delta_rot2, delta_trans]
+        # Compute rotations
+        delta_rot1 = delta_theta / 2.0  # Initial rotation
+        delta_rot2 = delta_theta / 2.0  # Final rotation
 
-    except ZeroDivisionError as e:
-        print("Error: Division by zero encountered in odometry calculations.", e)
-        return [0.0, 0.0, 0.0]
-
-    except ValueError as e:
-        print("Error: Invalid input encountered.", e)
-        return [0.0, 0.0, 0.0]
+        return [normalize_angle(delta_rot1), normalize_angle(delta_rot2),
+                straight_line_trans]
 
     except Exception as e:
         print("An unexpected error occurred:", e)

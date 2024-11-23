@@ -11,7 +11,10 @@ from controller import Robot
 from controller import Supervisor
 from controller import Keyboard
 
-MAX_SPEED = 12.3
+MAX_SPEED = 12.3 # Specification for the maximum speed
+WHEEL_BASE = 0.34 # Specification for the wheel distance
+WHEEL_RADIUS = 0.195 # Specification for the wheel radius
+DEBUG = False  # Set to False to disable debug message
 
 ############################### HELPER FUNCTIONS ##################################
 
@@ -130,21 +133,53 @@ def get_pose_delta(last_pose, curr_pose):
 
 # Returns the odometry measurement between two poses
 # according to the odometry-based motion model.
-def get_odometry(last_pose, curr_pose):
-    x = last_pose[0]
-    y = last_pose[1]
-    x_bar = curr_pose[0]
-    y_bar = curr_pose[1]
-    delta_trans = np.sqrt((x_bar - x) ** 2 + (y_bar - y) ** 2)
-    delta_rot = normalize_angle(last_pose[2] - curr_pose[2])
-    delta_rot1 = delta_rot / 2.0
-    delta_rot2 = delta_rot / 2.0
+def get_odometry(last_encoder, current_encoder):
+    """
+    Computes odometry from wheel encoder readings using the differential drive
+    model.
+    Args:
+        last_encoder (dict): Previous encoder readings with 'left' and 'right'
+        keys in radians.
+        current_encoder (dict): Current encoder readings with 'left' and
+        'right' keys in radians.
+    Returns:
+        list: [delta_rot1, delta_rot2, delta_trans], where:
+              - delta_rot1: First rotation in radians
+              - delta_rot2: Second rotation in radians
+              - delta_trans: Translation distance in meters
+    Raises:
+        ValueError: If input values are not numbers.
+    """
+    try:
+        # Calculate wheel displacements
+        delta_left = WHEEL_RADIUS * (current_encoder["left"] - 
+                                     last_encoder["left"])
+        delta_right = WHEEL_RADIUS * (current_encoder["right"] - 
+                                      last_encoder["right"])
 
-    if (delta_trans > 0.01):
-        delta_rot1 = normalize_angle(math.atan2(y_bar - y, x_bar - x) - last_pose[2])
-        delta_rot2 = normalize_angle(curr_pose[2] - last_pose[2] - delta_rot1)
+        # Compute arc length (average of left and right displacements) and
+        # orientation change
+        delta_trans = (delta_left + delta_right) / 2.0 
+        delta_theta = (delta_right - delta_left) / (WHEEL_BASE * 2.0)
 
-    return [delta_rot1, delta_rot2, delta_trans]
+        # Compute the translation (straight-line distance)
+        if delta_theta == 0:  # Straight-line motion
+            straight_line_trans = delta_trans
+        else:  # Circular motion -> use chord length
+            radius = delta_trans / delta_theta  
+            straight_line_trans = (abs(radius) * 
+                                   math.sin(abs(delta_theta) / 2.0))
+
+        # Compute rotations
+        delta_rot1 = delta_theta / 2.0  # Initial rotation
+        delta_rot2 = delta_theta / 2.0  # Final rotation
+
+        return [normalize_angle(delta_rot1), normalize_angle(delta_rot2),
+                straight_line_trans]
+
+    except Exception as e:
+        print("An unexpected error occurred:", e)
+        return [0.0, 0.0, 0.0]
 
 
 #################################### SENSOR MODEL ############################################
@@ -204,7 +239,37 @@ def distance_to_closest_circle(x, y, theta, circles):
 # the angle theta to the positive x-axis.
 # The borders are given by map_limits = [x_min, x_max, y_min, y_max].
 def distance_to_closest_border(x, y, theta, map_limits):
-    return float('inf')
+    # Calculate cosine and sine of the angle
+    ct = np.cos(theta)
+    st = np.sin(theta)
+
+    # Initialize closest distances to infinity
+    x_closest = float('inf')
+    y_closest = float('inf')
+
+    # Check horizontal distances (along the x-axis)
+    if ct != 0.0:
+        if ct > 0:
+            # Beam pointing to the right (positive x direction)
+            x_closest = (map_limits[1] - x) / ct
+        else:
+            # Beam pointing to the left (negative x direction)
+            x_closest = (map_limits[0] - x) / ct
+
+    # Check vertical distances (along the y-axis)
+    if st != 0.0:
+        if st > 0:
+            # Beam pointing upwards (positive y direction)
+            y_closest = (map_limits[3] - y) / st
+        else:
+            # Beam pointing downwards (negative y direction)
+            y_closest = (map_limits[2] - y) / st
+
+    # Return the minimum of the horizontal and vertical distances
+    # Take the minimum positive distance to ensure the closest border is chosen
+    distances = [x_closest, y_closest]
+    valid_distances = [dist for dist in distances if dist > 0]  # Only consider forward intersections
+    return min(valid_distances) if valid_distances else float('inf')
 
 
 # Returns the expected range measurements for all beams
@@ -326,23 +391,93 @@ def initialize_particles(num_particles, map_limits):
 # The weight of a new particle is the same as the weight from which
 # it was sampled.
 def resample_particles(particles, weights):
-    # replace with your code
-    new_particles = particles
-    new_weights = weights
+    """
+    Resample particles using the stochastic universal sampling algorithm.
+    
+    Args:
+        particles (list): List of particles to be resampled.
+        weights (list): Corresponding importance weights of the particles.
+    
+    Returns:
+        tuple: (new_particles, new_weights), where:
+               - new_particles (list): Resampled particles.
+               - new_weights (list): Weights of the resampled particles
+               (uniform distribution).
+    
+    Raises:
+        ValueError: If inputs are invalid (e.g., empty lists, mismatched
+        lengths).
+    """
+    try:
+        # Number of particles
+        num_particles = len(particles)
 
-    return new_particles, new_weights
+        # Normalize weights and check for valid sum
+        weight_sum = np.sum(weights)       
+        normalized_weights = np.array(weights) / weight_sum
+
+        # Cumulative sum of weights
+        cumulative_sum = np.cumsum(normalized_weights)
+
+        # Generate equally spaced pointers along the cumulative weight distribution
+        start = np.random.uniform(0, 1 / num_particles)
+        pointers = [start + i / num_particles for i in range(num_particles)]
+
+        # Resample particles using the pointers
+        new_particles = []
+        new_weights = []
+        index = 0
+        for pointer in pointers:
+            while pointer > cumulative_sum[index]:
+                index += 1
+            new_particles.append(particles[index])
+            new_weights.append(weights[index])
+
+        return new_particles, new_weights
+
+    except Exception as e:
+        print("An unexpected error occurred:", e)
+        return particles, weights
 
 
 # Replaces half of the particles with the lowest weights
 # with randomly sampled ones.
 # Returns the new set of particles
 def add_random_particles(particles, weights, map_limits):
-    # your code here
-    return particles
+    """
+    Replace half of the particles with the lowest weights with randomly sampled
+    ones.
+
+    Args:
+        particles (list): Current set of particles [[x1, y1, theta1],
+        [x2, y2, theta2], ...].
+        weights (list): Importance weights corresponding to each particle.
+        map_limits (list): [x_min, x_max, y_min, y_max] describing map
+        boundaries.
+
+    Returns:
+        list: New set of particles.
+    """
+    # Ensure there are particles and weights
+    num_particles = len(particles)
+    num_replace = num_particles // 2  # Number of particles to replace
+
+    # Sort particles by their weights (ascending order)
+    sorted_indices = np.argsort(weights)
+    indices_to_replace = sorted_indices[:num_replace]
+
+    # Replace particles with lowest weights
+    new_particles = particles.copy()
+    for idx in indices_to_replace:
+        new_particles[idx] = sample_random_particle(map_limits)
+
+    return new_particles
 
 
 ###########################################main################################
 def main():
+    print(sys.executable)
+
     # create the Robot instance.
     robot = Supervisor()
     robot_node = robot.getFromDef("Pioneer3dx")
@@ -406,6 +541,7 @@ def main():
 
     # last pose used for odometry calculations
     last_pose = get_curr_pose(trans_field, rot_field)
+    last_encoder = {"left": 0, "right": 1}
     # translation threshold for odometry calculation
     trans_thr = 0.1
 
@@ -429,19 +565,32 @@ def main():
         scan.reverse()
 
         # compute odometry from pose difference
-        odometry = get_odometry(last_pose, curr_pose)
+        if DEBUG:
+            print("Getting odometry:")
+        current_encoder = {"left": leftSensor.getValue(), 
+                           "right": rightSensor.getValue()}
+        odometry = get_odometry(last_encoder, current_encoder)
+        last_encoder = current_encoder
         last_pose = curr_pose
+        if DEBUG:
+            print(f"    {odometry[0]}, {odometry[1]} rad, {odometry[2]} m")
 
         # insert random particles
-        #particles = add_random_particles(particles, weights, map_limits)
+        particles = add_random_particles(particles, weights, map_limits)
 
         # predict particles by sampling from motion model with odometry info
+        if DEBUG:
+            print("Sample motion model")
         particles = sample_motion_model(odometry, particles)
     
         #calculate importance weights according to sensor model
+        if DEBUG:
+            print("Evaluate sensor model")
         weights = eval_sensor_model(scan, particles, obstacles, map_limits)
         
         #resample new particle set according to their importance weights
+        if DEBUG:
+            print("Resample particles")
         particles, weights = resample_particles(particles, weights)
 
         # plot current particle state
